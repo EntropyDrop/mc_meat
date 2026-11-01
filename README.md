@@ -78,7 +78,7 @@ python audit_face_v6.py --run runs/NEW_RUN
 python predict_face_v5.py --checkpoint runs/NEW_RUN/face_front_fine/model.pt --input skin.png --output runs/prediction/meat.png --cache cache/semantic_v3_20261101
 ```
 
-The comparison driver also requires its referenced historical OOF runs and a validated annotation audit. Adapt those experiment references explicitly for a new study. This is a research workflow, not a bundled dataset or pretrained installation. The prediction endpoint currently returns a binary mask; the five-class head provides auxiliary supervision.
+The comparison driver also requires its referenced historical OOF runs and a validated annotation audit. Adapt those experiment references explicitly for a new study. This is a research workflow, not a bundled dataset or pretrained installation.
 
 ## Checkpoint and cache compatibility
 
@@ -97,6 +97,20 @@ The script name depends on the model family. Preserve that run's original depend
 A manual update freezes saved skin/mask/metadata pairs, rejects stale or unsupported labels, groups near duplicates and reuses only provenance-matched features. The current update pipeline compares all-face and surface models with available five-class labels, verifies saved/reloaded inference and promotes a model only after successful checks. Historical MLP training uses CPU; feature extraction and newer surface training use short-lived GPU workers. Repeated update clicks attach to the active job. Failures preserve the previous model. Experimental facial decoder runs do not automatically replace production.
 
 Inference does not modify DDJ files or turn predictions into human labels. Uncommitted, explicitly saved working-tree labels can be snapshotted. Jobs retain code, inputs, hashes, logs and prior model identity locally.
+
+### Five-category preselection
+
+Compatible surface models return both the binary selection and 4,096 mutually exclusive category IDs: bare skin (1), eyes (2), mouth (3), eyebrows (5), beard (6), or unselected (0). DDJ applies all five categories as one undoable edit. Switching categories shows only that category's highlight; annotations are written only after an explicit save. Legacy binary models retain the previous behavior and report that fine categories are unavailable.
+
+`semantic_preselection.py` preserves the binary meat decision. Fine suggestions require auxiliary confidence of at least 0.7 and training-supported positions on head faces. This confidence threshold is a heuristic, not a calibrated accuracy estimate. Low-confidence meat cells fall back to bare skin; unsupported non-meat cells remain unselected. This prevents the closed-set auxiliary head from forcing all hair or clothing into a facial class.
+
+`semantic_support.py` builds the position support from known fine labels in the checkpoint's own frozen training snapshot. It pools layers and expands each labelled position by one cell within its face. Unknown fine cells are never used as negative labels. Support is checkpoint-bound and stored under ignored `service_runtime/semantic_support`; it is prepared automatically by subsequent manual training. To enable an existing compatible checkpoint:
+
+```sh
+python semantic_support.py --checkpoint service_runtime/production/jobs/JOB/run/surface/model.pt --data service_runtime/production/jobs/JOB/data --cache service_runtime/production/jobs/JOB/face_cache
+```
+
+This remains a preselection aid: unusual facial layouts and sparse mouth/beard examples can be missed or misclassified. A class that was not labelled in training is not fabricated at inference. The front-only facial decoder also restricts fine predictions to its supervised front scope.
 
 ## Historical experiments and tests
 
