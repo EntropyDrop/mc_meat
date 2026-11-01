@@ -1,0 +1,83 @@
+{
+  "schema": "uv-meat-segmentation-v2-no-manual-start",
+  "status": "feasibility_probe_no_trained_weights",
+  "input": {
+    "shape": [
+      64,
+      64,
+      4
+    ],
+    "model_type": "classic",
+    "source_photo_required": false
+  },
+  "classes": {
+    "0": "non_meat",
+    "1": "meat",
+    "255": "ignore_or_unlabeled"
+  },
+  "meat": [
+    "bare_body_skin",
+    "face",
+    "ears",
+    "nose",
+    "eyes",
+    "lips_and_mouth",
+    "bare_hands_and_feet"
+  ],
+  "non_meat": [
+    "hair",
+    "beard",
+    "eyebrows",
+    "glasses",
+    "hats",
+    "crowns",
+    "clothes",
+    "hoodies",
+    "shoes",
+    "gloves",
+    "bracelets",
+    "accessories"
+  ],
+  "layers": {
+    "inner": [
+      0,
+      1
+    ],
+    "outer": [
+      0,
+      1
+    ],
+    "must_match": false
+  },
+  "exclude": [
+    "invalid_atlas_cells",
+    "alpha_zero",
+    "unresolved_semantic_ambiguity"
+  ],
+  "preserve_existing_splits": true,
+  "split_caveat": "Historical coarse-family splits; additional near-duplicate audit required before scaling training.",
+  "threshold": null,
+  "threshold_policy": "No validated threshold yet. Without reviewed real labels do not claim real-world accuracy. Unrelated to head-alpha threshold 0.25.",
+  "annotation_record_required": [
+    "input_sha256",
+    "uv_canonical_sha256",
+    "model_type",
+    "label_schema",
+    "label_path",
+    "label_sha256",
+    "annotation_source",
+    "review_status",
+    "split",
+    "family"
+  ],
+  "never_use_as_ground_truth": [
+    "skin_color_heuristics",
+    "inner_or_outer_layer",
+    "body_part_id",
+    "alpha_mask",
+    "unreviewed_vlm_or_sam_output"
+  ],
+  "output_changes_input_texture": false,
+  "untrained_outputs_allowed": "Only explicitly labeled feasibility candidates; not a deployed classifier.",
+  "new_manual_pixel_annotations_required": false
+}

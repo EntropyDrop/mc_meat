@@ -1,0 +1,8 @@
+{
+  "dino_source": "./dependencies/dinov2",
+  "backbone": "./weights/dinov2_vitl14_reg4_pretrain.pth",
+  "renderer": "./dependencies/differentiable_minecraft_renderer/differentiable_renderer.py",
+  "assets": "./renderer_assets",
+  "probe_layout": "./probe_layout",
+  "probe_queue": "./annotation_queue/train.jsonl"
+}

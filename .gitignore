@@ -1,0 +1,17 @@
+.models/
+runs/
+cache/
+data/
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+!.env.example
+local_paths.json
+service_runtime/
+jobs/
+
+# Local experiment outputs and deployment recovery copies.
+/diagnostics/
+/experiments/

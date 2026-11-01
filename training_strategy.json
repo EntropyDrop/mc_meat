@@ -1,0 +1,13 @@
+{
+  "status": "proposal_not_trained",
+  "manual_pixel_annotation_required_to_start": false,
+  "automatic_labels_are_ground_truth": false,
+  "current_teacher_batch_admitted_for_training": false,
+  "reason": "Qualitative clothing false positives and dual-teacher accepted meat count of zero in the eight-case feasibility probe.",
+  "candidate_label_sources": ["procedural_semantic_masks_saved_during_generation", "text_conditioned_segmentation_with_local_semantic_verification", "multi_view_teacher_consensus_with_abstention"],
+  "student": {"backbone": "frozen_dinov2", "input": ["uv_rgba", "face_aware_local_texture", "multi_view_features", "part_face_layer_context"], "output": "64x64 meat/non_meat logits with abstention", "source_required": false},
+  "loss": ["masked_class_balanced_cross_entropy_on_accepted_labels", "augmentation_consistency_on_same_uv_ids"],
+  "safeguards": ["preserve_family_splits", "audit_near_duplicates", "ignore_transparent_invalid_unobserved_conflicting_cells", "no_layer_or_color_as_semantic_ground_truth", "require_positive_and_negative_training_support", "retain_label_provenance_and_model_revision"],
+  "without_real_ground_truth_report_only": ["coverage", "class_support", "conflict_rate", "consistency", "synthetic_holdout_metrics", "qualitative_observations"],
+  "not_claimed": ["real_skin_accuracy", "validated_classifier", "SAM3_quality", "production_deployment"]
+}
