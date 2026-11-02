@@ -208,3 +208,64 @@ python -m unittest test_face_v12 test_face_v9
 `rare_analysis.json` separates missing beard/eyeshadow/nose categories from incorrect binary meat assignments, reports false-positive origins and false-negative destinations, and includes exploratory paired intervals resampled by source group. The portable report can switch models, target category and error overlays. Unsupported categories in the old five-class online reference are shown as unavailable, not scored as a competing detector.
 
 These remain historical development comparisons with few positive skins. Added assistant labels are weak supervision pending human review. Improvement on these folds is not proof of performance on a new blind dataset.
+
+
+## Corrected labels and bounded head refinement
+
+The v13 boundary experiments, v14 source-balanced/context experiments, and v15
+corrected-label experiments are offline studies. They do not replace the active
+annotation model. Frozen datasets, feature caches, checkpoints, reports and local
+job records stay in ignored directories.
+
+V13 preserves partial weak supervision and adds side/chin annotations, synthetic
+upper-eyelid makeup and partially labeled hard negatives. Unknown cells do not
+become fine-category negatives. V14 separates human and auxiliary supervision,
+groups synthetic replicas by parent, and tests six-face head context, known hard
+negatives and a learned presence gate. Its separately archived nested-calibration
+experiment fits thresholds only on inner out-of-fold predictions from the outer
+training partition. Strong rejection reduced false positives but lost true beards.
+Use the `_r2` calibration and standalone inference entry points; earlier versions
+are retained to reproduce the original frozen experiment and recovery provenance.
+
+V15 uses a separate, user-confirmed correction of 88 beard cells in two historical
+skins: white hair and hood/collar become other non-meat. Canonical annotations are
+preserved. The portable annotation revision is recorded separately in the DDJ
+dataset repository under `annotation_revisions/20261102_beard_correction`.
+All historical predictions are re-scored against the same corrected targets.
+
+Three matched v15 arms retain the same five source-disjoint folds, seed 42, frozen
+DINO features, highest float32 matmul precision and fixed 0.5 output confidence:
+
+- `original_labels_control_v15`: original labels and decoder/loss, 200 epochs.
+- `corrected_labels_v15`: only the two confirmed label corrections, 200 epochs.
+- `bounded_refine_v15`: initialize from the corresponding corrected-label fold,
+  freeze the entire base decoder, and train six-face head refinement for 100 epochs.
+  Each head logit residual is bounded to [-1, 1]; body logits remain unchanged.
+  Fine supervision separates human and auxiliary means, gives the auxiliary term
+  weight 0.5, and groups replicas by parent. Known hard negatives use weight 0.025
+  and distribution preservation uses KL weight 0.05.
+
+Never initialize a held-out fold from the full-data checkpoint. The trainer checks
+fold membership and frozen weights; finalization audits all 18 checkpoints,
+independent UV-only inference, cached versus fresh features and archived CLI use.
+
+```sh
+python train_face_v15.py --data data/CORRECTED --old-data data/ORIGINAL --cache cache/FACES --output runs/CORRECTED_RUN --parent runs/PARENT_COMPARISON
+python finalize_face_v15.py --run runs/CORRECTED_RUN --job jobs/CORRECTED_RUN --data data/CORRECTED --cache cache/FACES
+python runs/CORRECTED_RUN/source/predict_face_v15.py --checkpoint runs/CORRECTED_RUN/bounded_refine_v15/model.pt --input skin.png --output output/NEW_CASE
+python -m unittest test_face_v13 test_face_v14 test_calibration_v14 test_face_v15
+```
+
+Inputs are UV images only. Semantic annotations are supervision or outputs, never
+inference inputs. The finalizer expects the job's correction audit and preflight
+record, and the trainer requires a fresh output directory. The archived source is
+preferred when reproducing a frozen experiment.
+
+On 169 historical development skins, the matched original-label control versus
+bounded refinement produced beard FP/FN 2553/30 versus 843/50, eyeshadow 87/7 versus
+77/7, and nose 125/9 versus 85/8. Beard precision improved but recall regressed; this
+is not a complete solution or a deployment recommendation. Corrected beard support
+is only 77 cells in three skins, including 72 cells in one character. Eyeshadow and
+nose support remain 28 and 17 cells. These are reused development folds, not a new
+blind test. Inspect per-case reports, missed positives and false-positive negatives
+before considering any model change.
