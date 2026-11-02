@@ -33,7 +33,7 @@ The optional teacher downloaders respect standard `HTTP_PROXY`, `HTTPS_PROXY` an
 
 Binary masks use `mc-meat-v2`: 64x64 RGBA, white for meat, black for non-meat and transparent for ignore. Training preserves the original skin, a visibility-filtered skin, the target and its valid mask. Feature extraction, loss, metrics and predictions exclude ignored cells. Ignored input RGBA is cleared to zero.
 
-Current optional fine classes are mutually exclusive:
+The original five-class checkpoints use these mutually exclusive fine classes:
 
 | PNG class ID | Class | Binary target |
 | --- | --- | --- |
@@ -46,6 +46,30 @@ Current optional fine classes are mutually exclusive:
 ID 0 means unknown fine class and does not imply non-meat. Such cells still participate in binary training when a binary label exists. Hair, glasses and other clothing/accessories are not fine categories; retired IDs 4, 7 and 8 are rejected by the current schema. Fine labels must agree with saved binary labels and skin/visibility hashes. Saving labels does not trigger training.
 
 The classifier currently validates classic arms and binary alpha only. Visibility computation itself also supports slim geometry and never treats partially transparent outer cells as complete coverage. Before retraining legacy labels, use the DDJ visibility migration tool in dry-run mode, inspect its report, then apply it. Annotation and classifier visibility implementations must agree.
+
+## Seven-class reviewed training
+
+`semantic_schema_v3.py` extends the editable taxonomy without changing historical five-class checkpoint definitions. Class 9 is eyeshadow (explicit makeup, excluding eyeliner/lashes); class 10 is nose. Both belong to meat. Eyebrows and beard remain non-meat. Retired IDs 4, 7 and 8 remain invalid. Class 0 represents other only after explicit whole-skin review; partial unknown labels continue to receive binary supervision alone.
+
+The `face_v9_seven_20261102` experiment freezes all 169 fully reviewed skins from dataset commit `3d00dad0`. It uses frozen DINO features, exact visibility filtering, and five whole-skin/near-duplicate grouped folds. Two jointly supervised seven-class models use identical splits, 200 epochs, random decoder initialization and a fixed 0.5 confidence threshold:
+
+- `surface_v9`: surface adjacency, part/layer pooling and per-skin context.
+- `face_v9`: the same backbone plus paired inner/outer convolutions and attention across all six head faces.
+
+The internal softmax includes other plus the seven editable categories. Binary meat probability sums skin, eyes, mouth, eyeshadow and nose probabilities. Fine false positives are evaluated across all reviewed valid cells, including unselected other cells. Historical validation is not a fresh blind benchmark. Beard (5 skins), eyeshadow (8) and nose (9) have few positive examples, so per-class results need careful review.
+
+`prepare_face_v9.py` reads committed Git/LFS objects, verifies PNG/JSON consistency and complete review metadata, then reuses features only when code, input and cache hashes match. `run_face_v9.py` produces same-fold comparisons, a separate historical production reference, full-data weights, standalone cached/uncached inference audits, and a portable report. It never changes the active annotation model. The existing manual training service remains on the historical five-class pipeline until a seven-class candidate is explicitly integrated and selected.
+
+```sh
+python prepare_face_v9.py --dataset /path/to/dataset --revision COMMIT --data data/NEW_RUN --cache cache/NEW_RUN_multiview --faces cache/NEW_RUN --job jobs/NEW_RUN
+python run_face_v9.py --data data/NEW_RUN --cache cache/NEW_RUN --output runs/NEW_RUN --reference /path/to/current/surface/model.pt --job jobs/NEW_RUN
+python predict_face_v9.py --checkpoint runs/NEW_RUN/face_v9/model.pt --input skin.png --output runs/new_prediction --cache cache/NEW_RUN
+python test_face_v9.py
+```
+
+`loss_face_v9b.py` adds an isolated rare-class balancing experiment after a training-fit diagnostic found that eyeshadow and nose were not learned even on training examples. It averages cross-entropy within each present training class, then across classes, while keeping binary supervision unchanged. `train_face_v9b.py`, `run_face_v9b.py` and `report_face_v9b.py` use the same frozen data, folds, initialization, epochs and thresholds. Both original and balanced results are retained; this is an exploratory development comparison, not an independently selected blind test. Use `test_face_v9b.py` to verify equal per-class gradient mass and partial-label handling.
+
+For reproducibility, run completed checkpoints using the scripts archived under their run's `source/` directory. Supply dependency paths through local configuration. Prediction consumes only the skin and optional hash-matched image features; labels are never inference inputs.
 
 ## Models and supervision
 
@@ -94,7 +118,7 @@ The script name depends on the model family. Preserve that run's original depend
 
 `model_service.py` is an SSH/JSON broker for the DDJ annotator. It exposes no HTTP listener. Its `status` operation does not load CUDA. Prediction and training are detached jobs started only by explicit UI actions. Active state lives in `service_runtime/production/active.json`; a prediction pins its model at submission.
 
-A manual update freezes saved skin/mask/metadata pairs, rejects stale or unsupported labels, groups near duplicates and reuses only provenance-matched features. The current update pipeline compares all-face and surface models with available five-class labels, verifies saved/reloaded inference and promotes a model only after successful checks. Historical MLP training uses CPU; feature extraction and newer surface training use short-lived GPU workers. Repeated update clicks attach to the active job. Failures preserve the previous model. Experimental facial decoder runs do not automatically replace production.
+A manual update freezes saved skin/mask/metadata pairs, rejects stale or unsupported labels, groups near duplicates and reuses only provenance-matched features. `service_face_v8.py` now connects the manual button to the facial decoder, a same-split surface control, nested body confidence calibration, and training-only positive spatial support. It promotes the candidate only after inference, release-integrity and quality checks pass. Historical MLP training uses CPU; feature extraction and newer training use short-lived GPU workers. Repeated update clicks attach to the active job. Failed checks preserve the previous model and retain the candidate report.
 
 Inference does not modify DDJ files or turn predictions into human labels. Uncommitted, explicitly saved working-tree labels can be snapshotted. Jobs retain code, inputs, hashes, logs and prior model identity locally.
 
@@ -102,7 +126,7 @@ Inference does not modify DDJ files or turn predictions into human labels. Uncom
 
 Compatible surface models return both the binary selection and 4,096 mutually exclusive category IDs: bare skin (1), eyes (2), mouth (3), eyebrows (5), beard (6), or unselected (0). DDJ applies all five categories as one undoable edit. Switching categories shows only that category's highlight; annotations are written only after an explicit save. Legacy binary models retain the previous behavior and report that fine categories are unavailable.
 
-`semantic_preselection.py` preserves the binary meat decision. Fine suggestions require auxiliary confidence of at least 0.7 and training-supported positions on head faces. This confidence threshold is a heuristic, not a calibrated accuracy estimate. Low-confidence meat cells fall back to bare skin; unsupported non-meat cells remain unselected. This prevents the closed-set auxiliary head from forcing all hair or clothing into a facial class.
+For legacy surface checkpoints, `semantic_preselection.py` preserves the binary meat decision. Fine suggestions require auxiliary confidence of at least 0.7 and training-supported positions on head faces. This heuristic cannot make a closed-set auxiliary classifier understand other categories. New facial checkpoints use the joint output described below.
 
 `semantic_support.py` builds the position support from known fine labels in the checkpoint's own frozen training snapshot. It pools layers and expands each labelled position by one cell within its face. Unknown fine cells are never used as negative labels. Support is checkpoint-bound and stored under ignored `service_runtime/semantic_support`; it is prepared automatically by subsequent manual training. To enable an existing compatible checkpoint:
 
@@ -110,7 +134,27 @@ Compatible surface models return both the binary selection and 4,096 mutually ex
 python semantic_support.py --checkpoint service_runtime/production/jobs/JOB/run/surface/model.pt --data service_runtime/production/jobs/JOB/data --cache service_runtime/production/jobs/JOB/face_cache
 ```
 
-This remains a preselection aid: unusual facial layouts and sparse mouth/beard examples can be missed or misclassified. A class that was not labelled in training is not fabricated at inference. The front-only facial decoder also restricts fine predictions to its supervised front scope.
+This remains a preselection aid: unusual facial layouts and sparse mouth/beard examples can be missed or misclassified. Historical front-only facial checkpoints retain their original supervised front scope.
+
+### Joint facial decoder and review status
+
+`face_decoder_v8.py` uses masked inner/outer grids for all six head faces, facial attention, surface neighbors and per-skin context. DINO remains frozen. Internally, the decoder predicts other, bare skin, eyes, mouth, eyebrows and beard; the annotator still exposes only the original five mutually exclusive categories. Unknown fine cells receive only binary marginal supervision, never an invented other label. Fine labels use class balancing and their recorded provenance weights.
+
+The explicit complete-review checkbox records `fine_review_complete`. Only after the user confirms the whole valid skin may unselected cells supply other-category fine supervision. Old partial annotations retain their original status. The dataset fingerprint includes semantic metadata, so review-only changes trigger an update indication.
+
+`calibrate_face_v8.py` uses three inner grouped folds inside each outer training fold to select body thresholds for a predeclared F0.5 objective. Outer labels never select their thresholds. Deployment thresholds come from whole-data OOF predictions. The precision mode reduces false selections at the cost of missed selections; balanced mode uses the same weights without body calibration. Neither changes the five UI categories. Uncertain cells remain unselected and are explicitly reported for review.
+
+`train_face_v8.py` compares new and old structures on the same five grouped folds and saves final all-data weights separately. Current-model reference predictions use historical held-out checkpoints, or the old final model only for cases it never trained on. Fine metrics describe known labels with mixed human/assistant provenance, not a new blind benchmark or full-skin fine-class accuracy. A quality gate failure prevents automatic promotion.
+
+```sh
+python train_face_v8.py --data data/SNAPSHOT --cache cache/FACES --output runs/BASE_RUN --reference runs/PREVIOUS/face_v8/model.pt
+python calibrate_face_v8.py --parent runs/BASE_RUN --data data/SNAPSHOT --cache cache/FACES --output runs/CALIBRATED_RUN
+python rejection_face_v8.py --parent runs/CALIBRATED_RUN --output runs/CANDIDATE_RUN
+python report_face_v8.py --run runs/CANDIDATE_RUN --cache cache/FACES
+python -m unittest test_face_v8
+```
+
+`rejection_face_v8.py` abstains from eye, mouth, eyebrow and beard predictions outside the positions supported by known positive training labels, with a one-cell margin. Each outer fold constructs this support only from its own training partition. Both inference modes use it. This is an abstention aid, not learned hair/clothing recognition; unusual layouts may be missed. Unknown fine labels remain unknown. The mechanism was added after inspecting development predictions, so historical results are exploratory rather than a fresh blind evaluation.
 
 ## Historical experiments and tests
 
@@ -123,3 +167,25 @@ python -m unittest -v test_pseudo_gates test_supervised test_visibility test_sur
 ```
 
 External models and dependencies retain their own licenses. See `LICENSE` for this repository's license.
+
+
+## Rare-category specialists and nested calibration
+
+The face_v10_rare_20261102 and face_v11_rare_20261102 experiments retain the ordinary seven-class model as the default prediction and train separate beard, eyeshadow and nose heads. Their supervision uses equal positive-skin means, the hardest 16 reviewed negative cells per skin/class, an all-negative term and an image-level presence task. Unknown fine cells and invisible cells do not become negative examples.
+
+V10 inherits the ordinary decoder's frozen feature backbone. V11 tests a balanced decoder initialization for the specialists, retains the ordinary fallback, uses a bounded presence factor of 0.5 + 0.5 * presence_probability, and searches all positive inner-OOF score breakpoints instead of a fixed coarse grid. Both preserve seven mutually exclusive user-facing categories. Specialists may correct the fallback binary assignment when accepted; no hard skin-color rules or mandatory symmetry are introduced.
+
+All comparisons retain the existing five outer skin/duplicate-group folds. Each outer training partition has three inner folds for threshold calibration. Every inner feature decoder and specialist excludes its own inner-held examples and the outer-held examples. V11 reuses only provenance-matched ordinary inner checkpoints and trains separate balanced inner initializers. Final full-data thresholds come from OOF predictions; they never replace the per-outer-fold thresholds in reported validation results.
+
+Run the standalone predict_face_v10.py or predict_face_v11.py archived in each completed run's inference_source/ package with --checkpoint, --input, --output and optional --cache. The input is UV only. Training, inference, label/source hashes and cached-versus-fresh inference are audited separately. These experiments do not modify the active annotation model or overwrite human annotations.
+
+These are exploratory historical comparisons, not a new blind test. There are only five beard-positive skins, eight eyeshadow-positive skins and nine nose-positive skins. Improved rejection can increase misses; always examine class-wise precision/recall and the portable report before selecting a model.
+
+
+## Guarded rare-category calibration
+
+The guarded derivatives preserve all trained tensors and original experiments. A specialist can override the ordinary decoder only if its inner-fold calibration has at least one true positive and precision of at least 0.35. Otherwise that category retains the ordinary result. This replaces the previous fallback that could select a very low threshold despite poor precision. Final full-data thresholds are separate from outer-fold evaluation thresholds.
+
+Run the archived predict_rare_guard.py from a guarded run with --checkpoint, --input, --output and optional --cache. The checkpoint uses schema mc-meat-rare-guarded-v1 and records its parent model hash and per-class enabled flags. It accepts a UV image only. Disabled categories are not erased from the ordinary prediction, and category assignments remain mutually exclusive.
+
+These derivatives are calibration changes, not additional retraining. They retain the fixed-threshold and unrestricted-calibration experiments in their reports. Rejecting more predictions is not evidence of improved recall; beard and nose remain limited by sparse positive skins. No experimental weights are automatically activated.

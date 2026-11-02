@@ -57,6 +57,9 @@ def job_status(d):
             write(d/'status.json', s)
     result = dict(s, pid=launch.get('pid'))
     nested = d/'face_cache/status.json' if s['stage']=='face_features' else d/'cache/status.json' if s['stage'] == 'features' else d/'run/status.json'
+    if s['stage']=='training':
+        progress_files=[d/f'{name}/status.json' for name in ['base_run','calibrated_run','run'] if (d/f'{name}/status.json').exists()]
+        if progress_files:nested=max(progress_files,key=lambda p:p.stat().st_mtime)
     if s['stage'] not in TERMINAL and nested.exists(): result['progress'] = read(nested)
     if s['kind'] == 'predict' and s['stage'] == 'complete': result['prediction'] = read(d/'prediction.json')
     return result
@@ -66,6 +69,9 @@ def verified_model(run, model_id, dataset_fingerprint=None):
     assert sha(run/'manifest.json') == release['manifest_sha256'], '训练清单校验失败'
     for name, expected in release['files'].items():
         assert Path(name).name == name and sha(run/name) == expected, '发布文件校验失败'
+    if release.get('schema')=='mc-meat-face-v8':
+        from service_face_v8 import verified_face
+        return verified_face(run,model_id,dataset_fingerprint,release)
     if release.get('schema')=='mc-meat-surface-v3':
         from service_surface_v3 import verified_surface
         return verified_surface(run,model_id,dataset_fingerprint,release)
@@ -153,6 +159,9 @@ def predict(d):
     assert sha(d/'skin.png')==req['skin_revision']
     read_skin(d/'skin.png')  # Reject unsupported geometry before loading a GPU model.
     torch.set_num_threads(4);ck=torch.load(ckpath,map_location='cpu',weights_only=True)
+    if ck.get('schema')=='mc-meat-face-v8':
+        from service_face_v8 import predict_job
+        return predict_job(d,req,ckpath)
     if ck.get('schema')=='mc-meat-surface-v3':
         from service_surface_v3 import predict_surface_job
         return predict_surface_job(d,req,ckpath)
@@ -207,7 +216,7 @@ def worker(state, ident):
         req=read(d/'request.json')
         if req['kind']=='predict': predict(d)
         else:
-            from service_surface_v3 import train_manual
+            from service_face_v8 import train_manual
             train_manual(state,d,req,ident)
         set_stage(d,'complete')
     except BaseException as e:
@@ -238,6 +247,7 @@ def dispatch(state, command, req):
             old=job_status(job_path(state,read(state/'last_train.json')['id']))
             if old['stage'] not in TERMINAL: return old
         if kind=='predict':
+            assert req.get('preselection_policy','precision') in {'precision','balanced'}, '预选策略无效'
             # Prevent unbounded queued GPU jobs from repeated clicks/tabs.
             active=[p for p in (state/'jobs').glob('*/status.json') if read(p).get('stage') not in TERMINAL]
             if sum(job_status(p.parent)['kind']=='predict' and read(p).get('stage') not in TERMINAL for p in active)>=4:
