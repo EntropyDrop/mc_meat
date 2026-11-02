@@ -189,3 +189,22 @@ The guarded derivatives preserve all trained tensors and original experiments. A
 Run the archived predict_rare_guard.py from a guarded run with --checkpoint, --input, --output and optional --cache. The checkpoint uses schema mc-meat-rare-guarded-v1 and records its parent model hash and per-class enabled flags. It accepts a UV image only. Disabled categories are not erased from the ordinary prediction, and category assignments remain mutually exclusive.
 
 These derivatives are calibration changes, not additional retraining. They retain the fixed-threshold and unrestricted-calibration experiments in their reports. Rejecting more predictions is not evidence of improved recall; beard and nose remain limited by sparse positive skins. No experimental weights are automatically activated.
+
+
+## Weak-label expansion with matched controls
+
+`train_face_v12.py` compares ordinary and class-balanced face decoders, each trained with human labels alone or with additional weak annotations. All four arms use the same frozen DINO features, architecture, seed, optimizer schedule, 200 epochs and fixed 0.5 output confidence. The original held-out skin IDs are retained. Known same-source counterparts are removed from the training portion in both the control and augmented arms.
+
+Assistant binary labels use their saved sample weight (0.5 for this batch). Fine supervision preserves per-cell confidence, and unknown fine categories receive no auxiliary loss. Complete human review permits supervision of the internal other class. A known assistant case overlapping historical data is excluded from augmentation. New weak examples are never evaluation targets or threshold-tuning examples.
+
+The full-data checkpoints use the existing `mc-meat-face-v9` inference schema and record their training variant separately. Use the archived `inference_source/predict_face_v9.py` with a UV image, a selected checkpoint, an optional matching feature cache and a fresh output directory. Training and finalization do not activate the annotation service model.
+
+```sh
+python train_face_v12.py --data data/EXPANDED --cache cache/EXPANDED_FACES --output runs/EXPANSION --parent runs/ORDINARY_REFERENCE --balanced runs/BALANCED_REFERENCE --guarded runs/GUARDED_REFERENCE
+python finalize_face_v12.py --run runs/EXPANSION --job jobs/EXPANSION --data data/EXPANDED --cache cache/EXPANDED_FACES
+python -m unittest test_face_v12 test_face_v9
+```
+
+`rare_analysis.json` separates missing beard/eyeshadow/nose categories from incorrect binary meat assignments, reports false-positive origins and false-negative destinations, and includes exploratory paired intervals resampled by source group. The portable report can switch models, target category and error overlays. Unsupported categories in the old five-class online reference are shown as unavailable, not scored as a competing detector.
+
+These remain historical development comparisons with few positive skins. Added assistant labels are weak supervision pending human review. Improvement on these folds is not proof of performance on a new blind dataset.
